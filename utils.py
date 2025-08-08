@@ -17,10 +17,10 @@ def crop_roi_to_pdf(in_pdf_path, out_pdf_path, page_number=0, bbox=(100, 500, 20
 
     # Optional: light cleanup for low-res scans
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    img = ImageOps.grayscale(img)
-    img = ImageOps.autocontrast(img)
-    if sharpen:
-        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=160))
+    # img = ImageOps.grayscale(img)
+    # img = ImageOps.autocontrast(img)
+    # if sharpen:
+    #     img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=160))
 
     # Encode as PNG bytes
     buf = io.BytesIO()
