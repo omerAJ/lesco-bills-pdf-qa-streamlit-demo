@@ -6,79 +6,124 @@ from agent_factory import create_agent
 from openai import OpenAI
 from utils import crop_roi_to_pdf
 
-st.title("Rent Agreement Q&A Chatbot")
-st.markdown("""
-Welcome! Upload your rent agreement PDFs and ask any questions about them.
-""")
-
-uploaded_files = st.file_uploader(
-    "Upload rent agreement PDFs", type=["pdf"], accept_multiple_files=True
+st.set_page_config(page_title="Electricity Bill Q&A", page_icon="⚡")
+st.title("⚡ Electricity Bill Q&A")
+st.markdown(
+    "Upload your **bill PDF**. We'll crop the meter area automatically and ask the model:\n"
+    "_“What is the reading on the meter?”_  \n"
+    "Then you can continue chatting to ask anything else from the same bill."
 )
 
-file_ids = []
-if uploaded_files:
-    st.session_state["pdfs"] = uploaded_files
-    st.success(f"{len(uploaded_files)} PDF(s) uploaded.")
-
-    with st.expander("Show uploaded PDF files"):
-        st.write([f.name for f in uploaded_files])
-
-    # Upload PDFs to OpenAI and get file IDs
-    if os.environ.get("OPENAI_API_KEY"):
-        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-        ROI_BBOX = (348, 469, 540, 610)  # <-- change these
-        for pdf_file in uploaded_files:
-            # Save upload to disk first
-            with open(pdf_file.name, "wb") as temp:
-                temp.write(pdf_file.read())
-
-            # Crop ROI and save to new PDF
-            roi_pdf_path = f"roi_{pdf_file.name}.pdf"
-            crop_roi_to_pdf(pdf_file.name, roi_pdf_path, page_number=0, bbox=ROI_BBOX, dpi=500)
-
-            # Upload ONLY the ROI-PDF
-            file_obj = client.files.create(
-                file=open(roi_pdf_path, "rb"),
-                purpose="user_data"
-            )
-            file_ids.append(file_obj.id)
-    else:
-        file_ids = ["dummy_file_id"]
-
-    st.session_state["file_ids"] = file_ids
-
-# Initialize agent with file_ids as context
-agent = None
-if "file_ids" in st.session_state:
-    agent = create_agent(context=st.session_state["file_ids"])
-
+# ---- Session State ----
 if "history" not in st.session_state:
     st.session_state.history = []
+if "file_ids" not in st.session_state:
+    st.session_state.file_ids = []
+if "initial_query_done" not in st.session_state:
+    st.session_state.initial_query_done = False
 
-for entry in st.session_state.history:
-    role, text = entry
-    if role == "user":
-        st.chat_message("user").write(text)
-    else:
-        st.chat_message("assistant").write(text)
+# ---- Constants ----
+# Change this ROI to match your meter area (PDF coordinate space: points, origin bottom-left)
+ROI_BBOX = (348, 469, 540, 610)  # (x0, y0, x1, y1)
+INITIAL_QUESTION = "What is the reading on the meter?"
 
-if prompt := st.chat_input("Your message"):
-    st.session_state.history.append(("user", prompt))
-    with st.spinner("Thinking…"):
+# ---- File Uploader (PDF only) ----
+uploaded_file = st.file_uploader(
+    "Upload electricity bill PDF", type=["pdf"], accept_multiple_files=False
+)
+
+# ---- On Upload: crop -> upload to OpenAI -> auto-ask initial question ----
+if uploaded_file and not st.session_state.file_ids:
+    if not os.environ.get("OPENAI_API_KEY"):
+        st.error("Missing OPENAI_API_KEY in environment. Please set it and refresh.")
+        st.stop()
+
+    with st.spinner("Processing PDF (cropping ROI)…"):
+        # Save the uploaded PDF to disk
+        local_pdf_path = uploaded_file.name
+        with open(local_pdf_path, "wb") as f:
+            f.write(uploaded_file.read())
+
+        # Crop ROI and save as a new (single-page) PDF for vision
+        roi_pdf_path = f"roi_{uploaded_file.name}.pdf"
+        crop_roi_to_pdf(local_pdf_path, roi_pdf_path, page_number=0, bbox=ROI_BBOX, dpi=500)
+
+        # Upload the cropped ROI-PDF to OpenAI
+        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        file_obj = client.files.create(
+            file=open(roi_pdf_path, "rb"),
+            purpose="user_data",  # keeps parity with Responses API usage
+        )
+        st.session_state.file_ids = [file_obj.id]
+
+    # Create agent & auto-ask the initial meter-reading question
+    agent = create_agent(context=st.session_state.file_ids)
+    st.session_state.history.append(("user", INITIAL_QUESTION))
+
+    with st.spinner("Asking the model for the meter reading…"):
+        # Build the LangChain-style message history for the agent
         messages = []
         for role, text in st.session_state.history:
             if role == "user":
                 messages.append(HumanMessage(content=text))
             elif role == "bot":
                 messages.append(AIMessage(content=text))
-        messages.append(HumanMessage(content=prompt))
+        # Final user message (the initial question)
+        messages.append(HumanMessage(content=INITIAL_QUESTION))
 
+        resp = agent.invoke({"messages": messages})
         ai_msg = ""
-        if agent:
+        if isinstance(resp, dict) and "messages" in resp:
+            ai_msgs = [m for m in resp["messages"] if isinstance(m, AIMessage)]
+            if ai_msgs:
+                ai_msg = ai_msgs[-1].content or ""
+
+        # Ensure the follow-up line is present for the very first response
+        followup = "Would you like to know anything else from the uploaded bill?"
+        if followup.lower() not in ai_msg.lower():
+            if ai_msg.strip():
+                ai_msg = f"{ai_msg.strip()}\n\n{followup}"
+            else:
+                ai_msg = followup
+
+        st.session_state.history.append(("bot", ai_msg))
+        st.session_state.initial_query_done = True
+        st.rerun()
+
+# ---- Show chat history (after upload) ----
+if st.session_state.history:
+    for entry in st.session_state.history:
+        role, text = entry
+        if role == "user":
+            st.chat_message("user").write(text)
+        else:
+            st.chat_message("assistant").write(text)
+
+# ---- Chat input (enabled only after a PDF is uploaded) ----
+if st.session_state.file_ids:
+    if prompt := st.chat_input("Ask anything else from this bill…"):
+        st.session_state.history.append(("user", prompt))
+        with st.spinner("Thinking…"):
+            # Recreate agent each turn to ensure it has the latest file_ids
+            agent = create_agent(context=st.session_state.file_ids)
+
+            # Build history for the agent call
+            messages = []
+            for role, text in st.session_state.history:
+                if role == "user":
+                    messages.append(HumanMessage(content=text))
+                elif role == "bot":
+                    messages.append(AIMessage(content=text))
+            messages.append(HumanMessage(content=prompt))
+
+            ai_msg = ""
             resp = agent.invoke({"messages": messages})
             if isinstance(resp, dict) and "messages" in resp:
                 ai_msgs = [m for m in resp["messages"] if isinstance(m, AIMessage)]
                 if ai_msgs:
-                    ai_msg = ai_msgs[-1].content
-        st.session_state.history.append(("bot", ai_msg))
-        st.rerun()
+                    ai_msg = ai_msgs[-1].content or ""
+
+            st.session_state.history.append(("bot", ai_msg))
+            st.rerun()
+else:
+    st.info("Please upload a PDF to begin.")
