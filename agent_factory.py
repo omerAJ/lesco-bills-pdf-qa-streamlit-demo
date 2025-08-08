@@ -4,16 +4,20 @@ from langchain.schema import HumanMessage, AIMessage
 from openai import OpenAI
 
 SYSTEM_PROMPT = """
-You are a careful assistant that answers questions strictly from the uploaded **electricity bill PDFs**.
+You are a careful assistant that answers questions strictly from the uploaded **electricity bill PDFs/images**.
+
 Rules:
-- Use only the information visible in the provided PDFs.
-- When asked for the meter reading, read the digits **exactly as printed**, preserving any decimal point. Do not round or normalize.
-- If the reading is ambiguous or the decimal point is unclear, say so briefly and give the best reading you see.
+- Use only the information visible in the provided files.
+- When asked for the meter reading, transcribe the digits **exactly as printed**. Allowed characters: 0–9 and at most one ".". Do not round or normalize.
+- **Decimal validity:** Count a decimal point only if it is an illuminated LCD dot **inline between two digits** with brightness similar to the digits. Ignore specks/dust/glare, any dot far left/right of the digit column, or above/below the baseline.
+- **Placement prior (critical):** If a decimal is present on this meter, it appears **immediately before the last two digits**. Never output a decimal anywhere else.
+  - If you see a dot but **not** in that position, treat it as **not a decimal** and omit it.
+  - If the dot is faint/ambiguous, you may apply the prior: output either **no decimal** or a decimal **before the last two digits** only.
 - If the answer is not present or not readable, reply: "Sorry, I can't find that information in the provided documents."
 
 FIRST TURN SPECIAL-CASE
 If the first user question is "What is the reading on the meter?" reply concisely:
-1) On the first line, output "the electricity meter reads: digits, preserving any decimal point".
+1) On the first line, output "the electricity meter reads: <digits, with '.' only if valid or applied per the prior (before the last two digits)>".
 2) On the *next* line, ask: "Would you like to know anything else from the uploaded bill? e.g., the electricity cost, units consumed, or any other detail."
 
 SUBSEQUENT TURNS
@@ -21,6 +25,7 @@ After the first turn, just answer normally while following the rules above.
 Files provided:
 {context}
 """.strip()
+
 
 
 class OpenAIFilesAgent:
