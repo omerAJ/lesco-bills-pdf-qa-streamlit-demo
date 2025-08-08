@@ -4,7 +4,7 @@ from langchain.schema import HumanMessage, AIMessage
 from openai import OpenAI
 
 SYSTEM_PROMPT = """
-You are a careful assistant that answers questions strictly from the uploaded **electricity bill PDFs** (cropped ROI pages).
+You are a careful assistant that answers questions strictly from the uploaded **electricity bill PDFs**.
 Rules:
 - Use only the information visible in the provided PDFs.
 - When asked for the meter reading, read the digits **exactly as printed**, preserving any decimal point. Do not round or normalize.
@@ -46,7 +46,7 @@ class OpenAIFilesAgent:
             {"type": "input_text", "text": user_question},
         ]
 
-        # FIX: use input_text (not text) for system content
+        # System message MUST use input_text (not text)
         system_msg = {
             "role": "system",
             "content": [
@@ -70,7 +70,7 @@ class OpenAIFilesAgent:
         if not output_text:
             try:
                 parts = []
-                for block in resp.output or []:
+                for block in getattr(resp, "output", []) or []:
                     for item in getattr(block, "content", []) or []:
                         if getattr(item, "type", None) in ("output_text", "text"):
                             parts.append(getattr(item, "text", "") or "")
