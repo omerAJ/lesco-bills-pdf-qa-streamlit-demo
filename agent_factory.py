@@ -29,7 +29,7 @@ class OpenAIFilesAgent:
         self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     def invoke(self, *args, **kwargs):
-        # Pull the last human question from the incoming history
+        # Get last human question
         messages = args[0].get("messages", []) if args else []
         user_question = ""
         for m in reversed(messages):
@@ -37,7 +37,7 @@ class OpenAIFilesAgent:
                 user_question = m.content
                 break
 
-        # Prepare content with files + the actual user question
+        # Compose content (files + text question)
         input_content = [
             *(
                 [{"type": "input_file", "file_id": fid} for fid in self.file_ids]
@@ -46,12 +46,12 @@ class OpenAIFilesAgent:
             {"type": "input_text", "text": user_question},
         ]
 
-        # Provide a system message so the model knows how to behave
+        # FIX: use input_text (not text) for system content
         system_msg = {
             "role": "system",
             "content": [
                 {
-                    "type": "text",
+                    "type": "input_text",
                     "text": SYSTEM_PROMPT.format(
                         context="\n".join([f"- {fid}" for fid in self.file_ids]) or "- (no files listed)"
                     ),
@@ -64,7 +64,21 @@ class OpenAIFilesAgent:
             model="gpt-4.1",
             input=[system_msg, user_msg],
         )
-        return {"messages": [AIMessage(content=resp.output_text)]}
+
+        # Be tolerant to SDK shape differences
+        output_text = getattr(resp, "output_text", None)
+        if not output_text:
+            try:
+                parts = []
+                for block in resp.output or []:
+                    for item in getattr(block, "content", []) or []:
+                        if getattr(item, "type", None) in ("output_text", "text"):
+                            parts.append(getattr(item, "text", "") or "")
+                output_text = "\n".join([p for p in parts if p]) or ""
+            except Exception:
+                output_text = ""
+
+        return {"messages": [AIMessage(content=output_text)]}
 
 
 def create_agent(context):
