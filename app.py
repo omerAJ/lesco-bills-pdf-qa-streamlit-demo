@@ -26,7 +26,7 @@ if uploaded_files:
     # Upload PDFs to OpenAI and get file IDs
     if os.environ.get("OPENAI_API_KEY"):
         client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-        ROI_BBOX = (356, 528, 538, 606)  # <-- change these
+        ROI_BBOX = (348, 469, 540, 610)  # <-- change these
         for pdf_file in uploaded_files:
             # Save upload to disk first
             with open(pdf_file.name, "wb") as temp:
