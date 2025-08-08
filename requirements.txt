@@ -4,5 +4,5 @@ langchain-openai
 langchain-community
 langgraph
 fitz
-PIL
+pillow
 io
