@@ -3,3 +3,6 @@ langchain
 langchain-openai
 langchain-community
 langgraph
+fitz
+PIL
+io
