@@ -15,7 +15,7 @@ Do not make up information or provide advice beyond what is contained in the PDF
 def create_agent() -> object:
     llm = ChatOpenAI(
         openai_api_key=os.environ["OPENAI_API_KEY"],
-        model_name="gpt-4.1-nano",
+        model_name="gpt-4.1",
         temperature=0.0
     )
     checkpointer = InMemorySaver()
